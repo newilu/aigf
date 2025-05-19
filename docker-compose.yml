@@ -1,0 +1,33 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: myapp:latest
+    container_name: telegram-bot-app
+    env_file:
+      - .env           # В продакшене лучше использовать Docker secrets или Swarm/K8s secrets
+    ports:
+      - "4040:3000"
+    depends_on:
+      - mongo
+    restart: unless-stopped
+    # В продакшенe НЕ монтируем исходники в контейнер:
+    # volumes:
+    #   - ./:/app
+
+  mongo:
+    image: mongo:5.0
+    container_name: telegram-bot-mongo
+    env_file:
+      - .env
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
