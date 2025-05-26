@@ -14,6 +14,7 @@ import {
   BATCH_DELAY_MS,
   AFTER_AWAY_PROMPT,
   RAZVOD_PROMPT,
+  AWAY_TIMEOUT_MS,
 } from "./constants/bot";
 import { MONGODB_URI } from "./constants/mongo";
 import { delay } from "./utils/helpers";
@@ -104,7 +105,7 @@ const processUserText = async (user: IUser, text: string) => {
         user.lastMessages.push(`BOT: ${replies.join("\n")}`);
       } else if (user.messageCount === 7) {
         user.isAway = true;
-        user.awayUntil = Date.now() + 1 * 60 * 1000;
+        user.awayUntil = Date.now() + AWAY_TIMEOUT_MS;
         await sendTgMessages(
           peer,
           [

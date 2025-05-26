@@ -157,8 +157,12 @@ const RAZVOD_PROMPT = `**Переработанный промт (без при�
 
 const HISTORY_WINDOW = 10;
 const SUMMARY_THRESHOLD = 10;
+
+// снизу для делея между сообщениями
 const BATCH_DELAY_MS = Number(process.env.BATCH_DELAY_MS) || 10_000;
-const AWAY_TIMEOUT_MS = Number(process.env.AWAY_TIMEOUT_MS) || 60000;
+
+// снизу для ушел
+const AWAY_TIMEOUT_MS = Number(process.env.AWAY_TIMEOUT_MS) || 60_000;
 
 export {
   AWAY_TIMEOUT_MS,
