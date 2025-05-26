@@ -7,6 +7,7 @@ export interface IUser {
   incomeLevel: "low" | "medium" | "high" | "unknown";
   dialogState: "greeting" | "questions" | "summary" | "dialog";
   questionsAsked: number;
+  messageCount: number;
   answers: string[];
   summaries: string[];
   summaryMessagesCount: number;
@@ -35,6 +36,7 @@ const userSchema = new mongoose.Schema<IUser>({
     enum: ["greeting", "questions", "summary", "dialog"],
   },
   questionsAsked: { type: Number, default: 0 },
+  messageCount: { type: Number, default: 0 },
   answers: { type: [String], default: [] },
   summaries: { type: [String], default: [] },
   summaryMessagesCount: { type: Number, default: 0 },

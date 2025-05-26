@@ -40,6 +40,7 @@ async function generateBotReply({
       temperature,
       top_p,
     });
+
     return (res.choices[0].message.content?.trim() || "").split("[END_MSG]");
   } catch (error) {
     console.error("API Error:", error);

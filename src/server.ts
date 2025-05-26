@@ -8,25 +8,21 @@ import { UserModel, IUser } from "./models/User";
 import { generateBotReply } from "./handlers/openai/generateBotReply";
 import { summarizeConversation } from "./handlers/openai/summarizeConversation";
 import {
-  QUESTIONS,
-  QUESTIONS_INIT_MESSAGE,
-  PHOTO_WARM_UP_MESSAGE,
-  SYSTEM_PROMPT_1,
-  SYSTEM_PROMPT_2,
+  PROMPT_LIST,
   HISTORY_WINDOW,
   SUMMARY_THRESHOLD,
   BATCH_DELAY_MS,
+  AFTER_AWAY_PROMPT,
+  RAZVOD_PROMPT,
 } from "./constants/bot";
 import { MONGODB_URI } from "./constants/mongo";
 import { delay } from "./utils/helpers";
 import { getCachedPeer } from "./utils/telegramCache";
 import { enqueueSend } from "./utils/sendQueue";
-import SendMessageUploadPhotoAction = Api.SendMessageUploadPhotoAction;
 
 dotenv.config();
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-const PHOTO_URL = "https://files.catbox.moe/k5hec2.jpeg";
 
 mongoose
   .connect(MONGODB_URI, { maxPoolSize: 50 })
@@ -48,11 +44,20 @@ async function sendTgMessages(
 }
 
 const processUserText = async (user: IUser, text: string) => {
+  console.log(user);
   const now = Date.now();
   if (user.awayUntil && now < user.awayUntil) {
     user.awayMessages.push(text);
     //@ts-ignore
     await user.save();
+    return;
+  }
+
+  if (user.messageCount >= 14) {
+    user.isAway = true;
+    user.awayUntil = now + 24 * 60 * 60 * 1000;
+    //@ts-ignore
+    user.save();
     return;
   }
 
@@ -70,66 +75,69 @@ const processUserText = async (user: IUser, text: string) => {
     user.summaryMessagesCount = 0;
   }
 
+  const prompt = PROMPT_LIST[Math.floor(Math.random() * PROMPT_LIST.length)];
+
   const peer = await getCachedPeer(user.userId);
   await tgClient.invoke(new Api.messages.ReadHistory({ peer }));
 
   switch (user.dialogState) {
-    case "greeting": {
+    case "dialog":
       user.stateTransitioning = true;
       //@ts-ignore
       await user.save();
-      const replies = await generateBotReply({
-        history: user.lastMessages,
-        summaries: user.summaries,
-        prompt: SYSTEM_PROMPT_1,
-      });
-      await sendTgMessages(peer, replies, user);
-      user.lastMessages.push(`BOT: ${replies.join("\n")}`);
-      await delay(3000);
-      await sendTgMessages(peer, [QUESTIONS_INIT_MESSAGE, QUESTIONS[0]], user);
-      user.questionsAsked = 1;
-      user.dialogState = "questions";
-      user.stateTransitioning = false;
-      break;
-    }
-    case "questions": {
-      user.answers.push(text);
-      if (user.questionsAsked >= 3) {
-        user.stateTransitioning = true;
-        //@ts-ignore
-        await user.save();
+      user.messageCount += 1;
+      if (user.messageCount === 8) {
         const replies = await generateBotReply({
-          history: user.answers,
-          prompt: SYSTEM_PROMPT_2,
+          history: user.lastMessages,
+          summaries: user.summaries,
+          prompt: AFTER_AWAY_PROMPT,
         });
         await sendTgMessages(peer, replies, user);
-        await delay(10_000);
-        await tgClient.invoke(
-          new Api.messages.SetTyping({
-            peer,
-            action: new SendMessageUploadPhotoAction({ progress: 100 }),
-          }),
+        user.lastMessages.push(`BOT: ${replies.join("\n")}`);
+      } else if (user.messageCount > 12) {
+        const replies = await generateBotReply({
+          history: user.lastMessages,
+          summaries: user.summaries,
+          prompt: RAZVOD_PROMPT,
+        });
+        await sendTgMessages(peer, replies, user);
+        user.lastMessages.push(`BOT: ${replies.join("\n")}`);
+      } else if (user.messageCount === 7) {
+        user.isAway = true;
+        user.awayUntil = Date.now() + 1 * 60 * 1000;
+        await sendTgMessages(
+          peer,
+          [
+            "ooh, sorryy, gotta run  [END_MSG] \n" +
+              "chatting with you was funn  [END_MSG] \n" +
+              "let’s vibe later, oky?  [END_MSG]",
+          ],
+          user,
         );
-        await delay(3000);
-        await tgClient.sendFile(user.userId, { file: PHOTO_URL });
-        await delay(3000);
-        await sendTgMessages(peer, [PHOTO_WARM_UP_MESSAGE], user);
-
-        user.dialogState = "dialog";
-        user.stateTransitioning = false;
       } else {
-        if (user.questionsAsked === 1) {
-          await sendTgMessages(peer, ["🤔"], user);
-          await delay(2000);
+        const replies = await generateBotReply({
+          history: user.lastMessages,
+          summaries: user.summaries,
+          prompt,
+        });
+        await sendTgMessages(peer, replies, user);
+        user.lastMessages.push(`BOT: ${replies.join("\n")}`);
+
+        const emojiList = ["😊", "😉", "😏", "😇"];
+
+        if (prompt === PROMPT_LIST[1] && Math.random() < 0.7) {
+          await sendTgMessages(
+            peer,
+            [emojiList[Math.floor(Math.random() * emojiList.length)]],
+            user,
+          );
         }
-        await sendTgMessages(peer, [QUESTIONS[user.questionsAsked]], user);
-        user.questionsAsked++;
       }
-      break;
-    }
-    case "dialog":
+
       break;
   }
+  user.stateTransitioning = false;
+
   //@ts-ignore
   await user.save();
 };
@@ -189,6 +197,19 @@ tgClient.addEventHandler(async (event: NewMessageEvent) => {
   const sender = await msg.getSender();
   const peer = (await tgClient.getInputEntity(sender!)) as any;
 
+  if (msg.message === "/reset") {
+    try {
+      // Удаляем документ пользователя из MongoDB
+      await UserModel.deleteOne({ userId: senderId });
+      // Отправляем пользователю подтверждение
+      await tgClient.sendMessage(peer, { message: "reset success" });
+    } catch (e) {
+      console.error("Reset error:", e);
+      await tgClient.sendMessage(peer, { message: "reset fail" });
+    }
+    return; // выход, чтобы не выполнять остальную логику
+  }
+
   // @ts-ignore
   if (msg.voice && msg.media?.toJSON().voice) {
     delay(BATCH_DELAY_MS)
@@ -213,8 +234,9 @@ tgClient.addEventHandler(async (event: NewMessageEvent) => {
     lastMessages: [],
     batchMessages: [],
     awayMessages: [],
+    messageCount: 0,
     summaryMessagesCount: 0,
-    dialogState: "greeting",
+    dialogState: "dialog",
     questionsAsked: 0,
     isAway: false,
   };
@@ -264,7 +286,8 @@ setInterval(async () => {
     await user.save();
     processUserText(user, text);
   }
-}, 1000);
+}, 5_000);
+
 (async () => {
   // @ts-ignore
   await tgClient.start({ onError: console.error });
